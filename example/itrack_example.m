@@ -5,12 +5,12 @@ clc
 close all;
 
 %first cd to wherever you put the iTrack folder (e.g., ~/Downloads/iTrack)
-datadir='./example';
+datadir='C:\Users\Zhongxu\Documents\MATLAB\myMatLabTools\iTrack-masterNew\example';
 cd(datadir)
 
 %get the name of all edf files in the directory
 edffiles = dir('*.edf');
-edffiles = {edffiles.name}
+edffiles = {edffiles(1).name}
 
 %% Load EDFs
 
@@ -35,6 +35,7 @@ clear z
 
 %this shows all the available options
 z = iTrack(edffiles,'subject_var','ID','samples',true,'droptrials',extra_trials,'keeptrials',[],'keepraw',false); %if you're only looking at fixations, change 'samples' to false!
+% z = iTrack(edffiles,'subject_var','ID','samples',true,'keeptrials',[],'keepraw',false); %if you're only looking at fixations, change 'samples' to false!
 
 %1024 x 768 is the default screen resolution. You can change it this way. 
 % z.screen.dims = [1024, 768]; 
@@ -50,6 +51,7 @@ methods(z) %lists all functions associated with the object
 %% Merge with Behavioral Data
 
 load beh.mat; %adds the table, 'beh' to the workspace
+
 %%
 
 %ideally, you send some message to Eyelink on each trial to identify it. In
@@ -85,7 +87,16 @@ z = extract_event(z,'search','RESPONSE','time',true,'behfield',true);
 
 z = clearROIs(z);
 
+
 coords = radialCoords(512,384,12,200,0); %creates coordinates of 12 objects, centered at [512,384] with a radius of 200 and starting at 0 degrees
+
+
+coords = horzcat(randsample(1024,2000,1),randsample(768,2000,1));
+for i = 1:2000
+    roinames{i}=['face',sprintf('%04d',i)];
+end
+z = makeROIs(z,coords,'shape','circle','xradius',40,'names',roinames); %elliptical rois rotated
+
 
 % z = makeROIs(z,coords,'shape','circle','radius',75); %simple circular rois
 z = makeROIs(z,coords,'shape','ellipse','xradius',40,'yradius',150,'angle',0:30:360); %elliptical rois rotated
@@ -113,13 +124,21 @@ z = drift_correct(z,{'Block'},'plot',true);
 %% Calculate "hits" for each ROI
 
 %calculate whether the eyes hit a given roi (fixations and saccades)
+tic
 z = calcHits(z,'rois','all');
+toc
+for i = 1:860
+    a=randsample(5,1);
+roiall{i}=roinames(randsample(2000,a));
+end
+ z = calcHits_zx(z,'rois',roiall);
 
 %%
 
 %using behavioral variables to indicate trial-by-trial ROIs
 z = mapROIs(z,'name',{'target','distractor'},'indicator',{'Targetpos','Distpos'});
 
+%%z = calcHits(z,'rois','1');
 %%
 
 %this creates a timeseries indicating whether eyes hit a given roi across
@@ -147,6 +166,7 @@ z = binData(z,25,'events',{'STIMONSET','RESPONSE'},'fix',true,'rois',{'target','
 close all
 scatterplots(z,{'Switch','Targetpos'},'roi',{'target'},'overlay',true,'hitonly',true)
 
+scatterplots(z,{'Switch','Distpos'},'roi',{'distractor'},'overlay',true,'hitonly',true)
 
 %% Line Plots
 
@@ -168,6 +188,7 @@ fix = report(z,'fixations','rois',{'target','distractor'}); %fixations
 sac = report(z,'saccades','rois',{'target','distractor'}); %saccades
 blinks = report(z,'blinks'); %blinks
 counts = report(z,'counts'); %counts of the different events
+fixepoch = report(z,'epoched_fixations','events',{'STIMONSET'},'rois',{'target','distractor'}); %fixations
 
 %%
 

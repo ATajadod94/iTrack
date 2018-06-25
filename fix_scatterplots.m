@@ -44,13 +44,11 @@ if p.Results.hitonly && ~isempty(p.Results.roi)
     fixdata = fixdata(fixdata.(strcat(p.Results.roi{1},'_hit'))==1,:);
 end
 
-
-%don't plot when any factor is NaN
+ 
 if p.Results.skipnan
     
     fixdata = fixdata(sum(isnan(fixdata{:,factors}),2)==0,:);
 end
-
 
 %screen dimensions
 screenx = p.Results.screendims(1);

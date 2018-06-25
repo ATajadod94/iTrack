@@ -204,13 +204,14 @@ mxArray* CEDFFile::Load(const char* Filename, unsigned char Options[3], bool Sam
 void CEDFFile::LoadTrials(void)
 {
 	// setting up trial navigation
-	if (edf_set_trial_identifier(SourceFile, "TRIALID", "TRIAL OK"))
-    mexErrMsgTxt("Failed to set up trial navigation identifier");
+	if (edf_set_trial_identifier(SourceFile, "TRIALID", "TRIAL OK")) {
+		mexErrMsgTxt("Failed to set up trial navigation identifier");
+	}
 	TotalTrials= edf_get_trial_count(SourceFile);
   
-  // trial structure
-  const int TrialFieldNumber= 3;
-  const char *TrialFieldNames[TrialFieldNumber]= {"Header", "Samples", "Events"};
+	// trial structure
+	const int TrialFieldNumber= 3;
+	const char *TrialFieldNames[TrialFieldNumber]= {"Header", "Samples", "Events"};
 
   // allocating output array
   mwSize TrialDims[]={1,2};
@@ -267,79 +268,88 @@ void CEDFFile::LoadSingleTrial(unsigned int iTrial)
 	// navigating to the current trial
 	int JumpResults= edf_jump_to_trial(SourceFile, iTrial);
    
-  // obtaining its header
+	// obtaining its header
 	int GoodJump= edf_get_trial_header(SourceFile, &Header);
-  mxSetFieldByNumber(mexTrials, iTrial, 0, ExportEDFInfo(Header));
+	mxSetFieldByNumber(mexTrials, iTrial, 0, ExportEDFInfo(Header));
 
 	// clearing arrays
-  SamplesClass.Reset();
-  Events.clear();
+	SamplesClass.Reset();
+	Events.clear();
 
-  // samples/events data holders
-  ALLF_DATA* CurrentData;
+	// samples/events data holders
+	ALLF_DATA* CurrentData;
 	int DataType;
 
 	// getting data
-  TrialIsOver= false;
-  UINT32 CurrentTime;
-	for(DataType= edf_get_next_data(SourceFile); DataType!=NO_PENDING_ITEMS && !TrialIsOver; DataType= edf_get_next_data(SourceFile))
+	TrialIsOver= false;
+	UINT32 CurrentTime;
+	unsigned long int Counter = 0;
+	for (DataType = edf_get_next_data(SourceFile); DataType != NO_PENDING_ITEMS && !TrialIsOver; DataType = edf_get_next_data(SourceFile), Counter++)
 	{
 		// obtaining actual data
  		CurrentData= edf_get_float_data(SourceFile);
-    switch(DataType) 
-    {
-    case SAMPLE_TYPE:
-      CurrentTime= CurrentData->fs.time;
-      AppendSample(CurrentData->fs);
-      break;
-    case STARTPARSE:
-    case ENDPARSE:
-    case BREAKPARSE:
-    case STARTBLINK :
-    case ENDBLINK:
-    case STARTSACC:
-    case ENDSACC:
-    case STARTFIX:
-    case ENDFIX:
-    case FIXUPDATE:
-    case MESSAGEEVENT:
-    case STARTSAMPLES:
-    case ENDSAMPLES:
-    case STARTEVENTS:
-    case ENDEVENTS:
-      CurrentTime= CurrentData->fe.sttime;
-      if (CurrentTime>Header.endtime)
-      {
-        TrialIsOver= true;
-        break;
-      }
-      AppendEvent(CurrentData->fe);
-      break;
-    case BUTTONEVENT:
-    case INPUTEVENT:
-    case LOST_DATA_EVENT:
-      CurrentTime= CurrentData->fe.sttime;
-    	if (CurrentTime>Header.endtime)
-      {
-        TrialIsOver= true;
-        break;
-      }
-      AppendEvent(CurrentData->fe);
-      break;
-    case RECORDING_INFO:
-      CurrentTime= CurrentData->fe.time;
-      //AppendRecordingInfo(CurrentData->rec);
-      break;
-    default:
-      CurrentTime= CurrentData->fe.time;
+		switch(DataType) {
+
+			case SAMPLE_TYPE:
+			CurrentTime= CurrentData->fs.time;
+			  AppendSample(CurrentData->fs);
+			  break;
+
+			case STARTPARSE:
+			case ENDPARSE:
+			case BREAKPARSE:
+			case STARTBLINK :
+			case ENDBLINK:
+			case STARTSACC:
+			case ENDSACC:
+			case STARTFIX:
+			case ENDFIX:
+			case FIXUPDATE:
+			case MESSAGEEVENT:
+			case STARTSAMPLES:
+			case ENDSAMPLES:
+			case STARTEVENTS:
+			case ENDEVENTS:
+				CurrentTime= CurrentData->fe.sttime;
+				if (CurrentTime>Header.endtime)
+				{
+				TrialIsOver= true;
+				break;
+				}
+				AppendEvent(CurrentData->fe);
+				break;
+
+			case BUTTONEVENT:
+			case INPUTEVENT:
+			case LOST_DATA_EVENT:
+				if (CurrentData) {
+					CurrentTime = CurrentData->fe.sttime;
+
+					if (CurrentTime>Header.endtime) {
+						TrialIsOver = true;
+						break;
+					}
+
+					AppendEvent(CurrentData->fe);
+				}
+
+				break;
+			case RECORDING_INFO:
+				CurrentTime= CurrentData->fe.time;
+				//AppendRecordingInfo(CurrentData->rec);
+				break;
+
+			default:
+				CurrentTime= CurrentData->fe.time;
 		}
+		//mexPrintf("%d - %d\n", CurrentTime, Counter);
+		//mexEvalString("drawnow");
     
-    //mexPrintf("%d\n", CurrentTime);
-    
-    // end of trial check
-    if (CurrentTime>Header.endtime)
-  break;
-  }
+		// end of trial check
+		if (CurrentTime > Header.endtime) {
+			break;
+		}
+	}
 }
   
 void CEDFFile::SaveSingleTrial(unsigned int iTrial)
@@ -384,8 +394,7 @@ mxArray* CEDFFile::ExportEDFInfo(TRIAL CurrentInfo)
  // creating field value holders
   mwSize FieldDims[2]= {1, 1};
   UINT32* InfoFieldPointer[InfoFieldNumber];
-  for(int iField= 1; iField<InfoFieldNumber; iField++)
-  {
+  for(int iField= 1; iField<InfoFieldNumber; iField++)  {
     FieldDims[0]= 1;
     FieldDims[1]= 1;
     mxArray* CurrentFieldMexPointer= mxCreateNumericArray(2, FieldDims, InfoFieldType[iField], mxREAL);
@@ -417,14 +426,13 @@ mxArray* CEDFFile::ExportRecordings(RECORDINGS CurrentRecord)
  // creating field value holders
   mwSize FieldDims[2]= {1, 1};
   void* RecordFieldPointer[RecordFieldNumber];
-  for(int iField= 0; iField<RecordFieldNumber; iField++)
-  {
+  for(int iField= 0; iField<RecordFieldNumber; iField++)  {
     mxArray* CurrentFieldMexPointer= mxCreateNumericArray(2, FieldDims, RecordFieldType[iField], mxREAL);
     mxSetFieldByNumber(mexRecord, 0, iField, CurrentFieldMexPointer);
     RecordFieldPointer[iField]= (void*)mxGetPr(CurrentFieldMexPointer);
   }
   
-//   // copying data
+   // copying data
   ((UINT32*)RecordFieldPointer[0])[0]= CurrentRecord.time;
   ((byte*)RecordFieldPointer[1])[0]= CurrentRecord.state;
   ((byte*)RecordFieldPointer[2])[0]= CurrentRecord.record_type;
