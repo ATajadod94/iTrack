@@ -1,7 +1,7 @@
-classdef iTrack < handle
+classdef iTrack  < handle
     
     properties
-        %         fields={'subjects','beh','eyedata'};
+        %fields={'subjects','beh','eyedata'};
         subs=cell(1,1);
         data=cell(1,1);
         raw=cell(1,1);
@@ -9,286 +9,261 @@ classdef iTrack < handle
         screen = struct;
         rois = struct;
         log = struct;
-        
-        
     end
     
-    methods
-        
-        function obj=iTrack(varargin)
-            p = inputParser;
-            p.addParameter('edfs',{},@(x) iscell(x) || ischar(x));
-            p.addParameter('samples',0,@(x) islogical(x) || ismember(x,[0,1]))
-            p.addParameter('subject_var','ID',@ischar)
-            p.addParameter('resolution',[1024,768],@(x) length(x)==2 && isnumeric(x));
-            p.addParameter('overlay',nan(1,3),@(x) isnumeric(x) && size(x,1)==3);
-            p.addParameter('keepraw',false);
-            p.addParameter('keeptrials',[]);
-            p.addParameter('droptrials',[]);
-            
-            
-            %optionally you can give first argument as the filename or cell
-            %array of file names.
-            if iscell(varargin{1}) %z = iTrack({'edf1.edf','edf2.edf'});
-                edfs = varargin{1};
-                parse(p,varargin{2:end});
+    methods        
+        function obj=iTrack(use_edf,varargin)
+            if use_edf ==1
+                p = inputParser;
+                p.addParameter('edfs',{},@(x) iscell(x) || ischar(x));
+                p.addParameter('samples',0,@(x) islogical(x) || ismember(x,[0,1]))
+                p.addParameter('subject_var','ID',@ischar)
+                p.addParameter('resolution',[1024,768],@(x) length(x)==2 && isnumeric(x));
+                p.addParameter('overlay',nan(1,3),@(x) isnumeric(x) && size(x,1)==3);
+                p.addParameter('keepraw',false);
+                p.addParameter('keeptrials',[]);
+                p.addParameter('droptrials',[]);
+                %optionally you can give first argument as the filename or cell
+                %array of file names.
+                if iscell(varargin{1}) %z = iTrack({'edf1.edf','edf2.edf'});
+                    edfs = varargin{1};
+                    parse(p,varargin{2:end});
+
+                elseif exist(varargin{1},'file') % z = iTrack('edfname.edf');
+                    edfs = {varargin{1}};
+                    parse(p,varargin{2:end});
+
+                else %this is if you say z = iTrack('edfs','edfname.edf')
+                    parse(p,varargin{:});
+                    edfs = p.Results.edfs;
+                end
                 
-            elseif exist(varargin{1},'file') % z = iTrack('edfname.edf');
-                edfs = {varargin{1}};
-                parse(p,varargin{2:end});
-                
-            else %this is if you say z = iTrack('edfs','edfname.edf')
-                parse(p,varargin{:});
-                edfs = p.Results.edfs;
-            end
-            
-            
-            
-            
-            
-            obj.subject_var = p.Results.subject_var;
-            
-            obj.screen.dims=p.Results.resolution;
-            
-            obj.rois.single = struct;
-            obj.rois.combined = struct;
-            
-            
-            %1 argument, cell of file names including full path
-            if ~isempty(edfs)
-                path=pwd;
-                
-                
-                
-            else
-                %default, no arguments, prompt for edf files
-                [edfs, path] = uigetfile({'*.edf'},'select edf files','MultiSelect','on');
-            end
-            
-            cd(path);
-            
-            %if only 1 filename given
-            if ~isa(edfs,'cell')
-                edfs={edfs};
-            end
-            
-            %main place where data is kept
-            obj.data=cell(length(edfs),1);
-            
-            %loop through all edfs
-            for s=1:length(edfs)
-                
-                fname=GetFullPath(edfs{s});
-                
-                [~,file,ext] =fileparts(fname);
-                justfile = strcat(file,ext);
-                
-                
-                %import edf file
-                
-                fprintf('Importing file %s...\n',fname);
-                
-                if p.Results.samples==1
-                    x=edfImport(fname,[1 1 1],'pa gx gy');
+                obj.subject_var = p.Results.subject_var;
+                obj.screen.dims=p.Results.resolution;
+                obj.rois.single = struct;
+                obj.rois.combined = struct;
+                %1 argument, cell of file names including full path
+                if ~isempty(edfs)
+                    path=pwd;
                 else
-                    x=edfImport(fname,[1 1 0]);
+                    %default, no arguments, prompt for edf files
+                    [edfs, path] = uigetfile({'*.edf'},'select edf files','MultiSelect','on');
                 end
-                
-                x=edfExtractInterestingEvents(x);
-                
-                
-                eye=x(1).Header.rec.eye;
-                sample_rate=x(1).Header.rec.sample_rate;
-                
-                %if we want to throw out some of the data
-                %for now, the same for each subject
-                
-                %keeping only certain trials
-                if ~isempty(p.Results.keeptrials)
-                    x = x(p.Results.keeptrials);
+
+                cd(path);
+
+                %if only 1 filename given
+                if ~isa(edfs,'cell')
+                    edfs={edfs};
                 end
-                
-                %dropping certain trials
-                if ~isempty(p.Results.droptrials)
-                    x(p.Results.droptrials)=[];
-                end
-                
-                %add these fields even if they're not necessarily used
-                [x.sample_rate] = deal(sample_rate);
-                [x.pa] = deal([]);
-                [x.gx] = deal([]);
-                [x.gy] = deal([]);
-                [x.fixation_times] = deal([]);
-                [x.fixation_time_mask] = deal([]);
-                [x.beh] = deal(struct);
-                %                 [x.fixation_hits]  = deal([]);
-                
-                obj.subs{s,1}=str2double(regexprep(justfile,'[!@#$%^&()?"*+=-:_'',./~` A-Za-z]','')); %subject number from filename, minus any funny characters
-                
-                %trials with no recorded fixations are empty [], but we want
-                %them to be structures with NaN's for each field - it makes
-                %life easier
-                
-                %create a blank structure for trials with no fixations
-                %zhongxu add if else
-                if ~isempty([x.Fixations])
-                    fnames = fieldnames([x.Fixations]); %fieldnames from fixation structure
-                else
-                    fnames = {'eye';'sttime';'entime';'time';'gavx';'gavy';'PixInDegX';'PixInDegY'};
-                end
-                
-                empty_struct = struct;
-                
-                for f=1:length(fnames)
-                    empty_struct.(fnames{f}) = NaN;
-                end
-                
-                
-                %fill those trials with our empty struct
-                [x(cellfun(@isempty,{x.Fixations})).Fixations] = deal(empty_struct);
-                
-                
-                %repeat for Saccades
-                %zhongxu add if else
-                if ~isempty([x.Saccades])
-                    fnames = fieldnames([x.Saccades]); %fieldnames from fixation structure
-                else
-                    fnames = {'eye';'sttime';'entime';'time';'gstx';'gsty';'genx';'geny';'avel';'pvel';'ampl';'phi';'PixInDegX';'PixInDegY'};
-                end
-                
-                empty_struct = struct;
-                
-                for f=1:length(fnames)
-                    empty_struct.(fnames{f}) = NaN;
-                end
-                
-                
-                %fill those trials with our empty struct
-                [x(cellfun(@isempty,{x.Saccades})).Saccades] = deal(empty_struct);
-                
-                
-                %repeat for Blinks
-                if ~isempty([x.Blinks])
-                    fnames = fieldnames([x.Blinks]); %fieldnames from fixation structure
-                else
-                    fnames =  {'eye';'sttime';'entime';'time'};
-                end
-                empty_struct = struct;
-                
-                for f=1:length(fnames)
-                    empty_struct.(fnames{f}) = NaN;
-                end
-                
-                
-                %fill those trials with our empty struct
-                [x(cellfun(@isempty,{x.Blinks})).Blinks] = deal(empty_struct);
-                
-                
-                
-                %this transposes all the fixation data so it's 1 row per
-                %fixation, instead of column-wise
-                temp = arrayfun(@(y) structfun(@transpose,y,'Uniform',false),[x.Fixations],'Uniform',false);
-                [x.Fixations] = deal(temp{:});
-                
-                %repeat for saccades
-                temp = arrayfun(@(y) structfun(@transpose,y,'Uniform',false),[x.Saccades],'Uniform',false);
-                [x.Saccades] = deal(temp{:});
-                
-                %repeat for blinks
-                temp = arrayfun(@(y) structfun(@transpose,y,'Uniform',false),[x.Blinks],'Uniform',false);
-                [x.Blinks] = deal(temp{:});
-                
-                
-                
-                for i=1:length(x)
-                    
-                    x(i).events=getEdfMessages(x(i));%external file
-                    
-                    %add the ID to the behavioral part, makes some
-                    %downstream functions work better
-                    x(i).beh.ID = obj.subs{s,1};
-                    x(i).eye_idx = i; %also add eye_idx for later
-                    x(i).beh.eye_idx = i;
-                    
-                    
-                    if p.Results.samples
-                        numsamples = length(x(i).Samples.pa); %when importing samples, a few extra samples are trimmed off the end
-                    else
-                        numsamples = x(i).Header.duration; %this is accurate enough for fixation data
-                    end
-                    
-                    x(i).index.raw=single(1:numsamples);
-                    x(i).numsamples = numsamples;
-                    
-                    
-                    %create a matrix of zeros for each trial that is
-                    % number fixations x  number of samples. Used for indexing fixation data
-                    if ~isempty(x(i).Fixations)
-                        x(i).fixation_times =single(zeros(length(x(i).Fixations.sttime),x(i).numsamples));
-                    end
-                    
+
+                %main place where data is kept
+                obj.data=cell(length(edfs),1);
+
+                %loop through all edfs
+                for s=1:length(edfs)
+
+                    fname=GetFullPath(edfs{s});
+
+                    [~,file,ext] =fileparts(fname);
+                    justfile = strcat(file,ext);
+
+
+                    %import edf file
+
+                    fprintf('Importing file %s...\n',fname);
+
                     if p.Results.samples==1
-                        %                         temp=x(i).Samples;
-                        %                         x(i).index.raw=double(0:length(temp.pa(eye,:))-1);
-                        %                         x(i).numsamples=x(i).index.raw(end)+1;
-                        x(i).pa=x(i).Samples.pa(eye,:);
-                        x(i).gx=x(i).Samples.gx(eye,:);
-                        x(i).gy=x(i).Samples.gy(eye,:);
-                        
+                        x=edfImport(fname,[1 1 1],'pa gx gy');
+                    else
+                        x=edfImport(fname,[1 1 0]);
                     end
+
+                    x=edfExtractInterestingEvents(x);
+
+
+                    eye=x(1).Header.rec.eye;
+                    sample_rate=x(1).Header.rec.sample_rate;
+
+                    %if we want to throw out some of the data
+                    %for now, the same for each subject
+
+                    %keeping only certain trials
+                    if ~isempty(p.Results.keeptrials)
+                        x = x(p.Results.keeptrials);
+                    end
+
+                    %dropping certain trials
+                    if ~isempty(p.Results.droptrials)
+                        x(p.Results.droptrials)=[];
+                    end
+
+                    %add these fields even if they're not necessarily used
+                    [x.sample_rate] = deal(sample_rate);
+                    [x.pa] = deal([]);
+                    [x.gx] = deal([]);
+                    [x.gy] = deal([]);
+                    [x.fixation_times] = deal([]);
+                    [x.fixation_time_mask] = deal([]);
+                    [x.beh] = deal(struct);
+                    %                 [x.fixation_hits]  = deal([]);
+
+                    obj.subs{s,1}=str2double(regexprep(justfile,'[!@#$%^&()?"*+=-:_'',./~` A-Za-z]','')); %subject number from filename, minus any funny characters
+
+                    %trials with no recorded fixations are empty [], but we want
+                    %them to be structures with NaN's for each field - it makes
+                    %life easier
+
+                    %create a blank structure for trials with no fixations
+                    %zhongxu add if else
+                    if ~isempty([x.Fixations])
+                        fnames = fieldnames([x.Fixations]); %fieldnames from fixation structure
+                    else
+                        fnames = {'eye';'sttime';'entime';'time';'gavx';'gavy';'PixInDegX';'PixInDegY'};
+                    end
+
+                    empty_struct = struct;
+
+                    for f=1:length(fnames)
+                        empty_struct.(fnames{f}) = NaN;
+                    end
+
+
+                    %fill those trials with our empty struct
+                    [x(cellfun(@isempty,{x.Fixations})).Fixations] = deal(empty_struct);
+
+
+                    %repeat for Saccades
+                    %zhongxu add if else
+                    if ~isempty([x.Saccades])
+                        fnames = fieldnames([x.Saccades]); %fieldnames from fixation structure
+                    else
+                        fnames = {'eye';'sttime';'entime';'time';'gstx';'gsty';'genx';'geny';'avel';'pvel';'ampl';'phi';'PixInDegX';'PixInDegY'};
+                    end
+
+                    empty_struct = struct;
+
+                    for f=1:length(fnames)
+                        empty_struct.(fnames{f}) = NaN;
+                    end
+
+
+                    %fill those trials with our empty struct
+                    [x(cellfun(@isempty,{x.Saccades})).Saccades] = deal(empty_struct);
+
+
+                    %repeat for Blinks
+                    if ~isempty([x.Blinks])
+                        fnames = fieldnames([x.Blinks]); %fieldnames from fixation structure
+                    else
+                        fnames =  {'eye';'sttime';'entime';'time'};
+                    end
+                    empty_struct = struct;
+
+                    for f=1:length(fnames)
+                        empty_struct.(fnames{f}) = NaN;
+                    end
+
+
+                    %fill those trials with our empty struct
+                    [x(cellfun(@isempty,{x.Blinks})).Blinks] = deal(empty_struct);
+
+
+
+                    %this transposes all the fixation data so it's 1 row per
+                    %fixation, instead of column-wise
+                    temp = arrayfun(@(y) structfun(@transpose,y,'Uniform',false),[x.Fixations],'Uniform',false);
+                    [x.Fixations] = deal(temp{:});
+
+                    %repeat for saccades
+                    temp = arrayfun(@(y) structfun(@transpose,y,'Uniform',false),[x.Saccades],'Uniform',false);
+                    [x.Saccades] = deal(temp{:});
+
+                    %repeat for blinks
+                    temp = arrayfun(@(y) structfun(@transpose,y,'Uniform',false),[x.Blinks],'Uniform',false);
+                    [x.Blinks] = deal(temp{:});
+
+
+
+                    for i=1:length(x)
+
+                        x(i).events=getEdfMessages(x(i));%external file
+
+                        %add the ID to the behavioral part, makes some
+                        %downstream functions work better
+                        x(i).beh.ID = obj.subs{s,1};
+                        x(i).eye_idx = i; %also add eye_idx for later
+                        x(i).beh.eye_idx = i;
+
+
+                        if p.Results.samples
+                            numsamples = length(x(i).Samples.pa); %when importing samples, a few extra samples are trimmed off the end
+                        else
+                            numsamples = x(i).Header.duration; %this is accurate enough for fixation data
+                        end
+
+                        x(i).index.raw=single(1:numsamples);
+                        x(i).numsamples = numsamples;
+
+
+                        %create a matrix of zeros for each trial that is
+                        % number fixations x  number of samples. Used for indexing fixation data
+                        if ~isempty(x(i).Fixations)
+                            x(i).fixation_times =single(zeros(length(x(i).Fixations.sttime),x(i).numsamples));
+                        end
+
+                        if p.Results.samples==1
+                            %                         temp=x(i).Samples;
+                            %                         x(i).index.raw=double(0:length(temp.pa(eye,:))-1);
+                            %                         x(i).numsamples=x(i).index.raw(end)+1;
+                            x(i).pa=x(i).Samples.pa(eye,:);
+                            x(i).gx=x(i).Samples.gx(eye,:);
+                            x(i).gy=x(i).Samples.gy(eye,:);
+
+                        end
+                    end
+
+                    if p.Results.samples==1
+                        x = rmfield(x,'Samples'); %removing redundant data
+                    end
+
+                    x= rmfield(x,'Events'); %also remove this to save memory
+                    x= rmfield(x,'Buttons'); %also remove this to save memory
+
+                    obj.raw{s,1}=x; %structure with all the information
+
+                    clear x;
                 end
-                
-                if p.Results.samples==1
-                    x = rmfield(x,'Samples'); %removing redundant data
+
+                %copy everything from the raw structure into our "data"
+                %structure. That way we can always revert back to the raw data
+                %without reloading edfs.
+                obj.data=obj.raw;
+
+                if ~p.Results.keepraw
+                    obj.raw = [];
                 end
-                
-                x= rmfield(x,'Events'); %also remove this to save memory
-                x= rmfield(x,'Buttons'); %also remove this to save memory
-                
-                obj.raw{s,1}=x; %structure with all the information
-                
-                clear x;
-            end
-            
-            %copy everything from the raw structure into our "data"
-            %structure. That way we can always revert back to the raw data
-            %without reloading edfs.
-            obj.data=obj.raw;
-            
-            if ~p.Results.keepraw
-                obj.raw = [];
-            end
-            
-            %check to see if everyone was recorded at same sample rate
-            checksamprate = unique(cellfun(@(x) unique(cell2mat(x)),subsref(obj,struct('type','.','subs','sample_rate')),'Uniform',true));
-            if length(checksamprate)>1
-                warning('WARNING: You have different sample rates for different subjects! Use "resample" if you are looking at pupil data!');
-            end
-            
-            
-            obj = index_fixations(obj); %represents the fixations with binary matricies, useful for other operations
-            
-            disp('done!');
+
+                %check to see if everyone was recorded at same sample rate
+                checksamprate = unique(cellfun(@(x) unique(cell2mat(x)),subsref(obj,struct('type','.','subs','sample_rate')),'Uniform',true));
+                if length(checksamprate)>1
+                    warning('WARNING: You have different sample rates for different subjects! Use "resample" if you are looking at pupil data!');
+                end
+
+
+                obj = index_fixations(obj); %represents the fixations with binary matricies, useful for other operations
+
+                disp('done!');
+            end     
         end
-        
-        
         function obj=reset(obj)
             %revert back to the raw data without reloading edfs.
             obj.data=obj.raw;
-            obj = index_fixations(obj);
-            
-        end
-        
-        
-        function obj = quickview(obj,varargin)
-            
-            
+            obj = index_fixations(obj);            
+        end       
+        function obj = quickview(obj,varargin)    
             scatterplots(obj,{obj.subject_var},'overlay',true);
-            
-            
-        end
-        
-        
+        end                
         function obj= add_behdata(obj,behFile,varargin)
             p = inputParser;
             p.addParameter('index',{},@iscell);
@@ -415,11 +390,7 @@ classdef iTrack < handle
                 
             end
             
-        end
-        
-        
-        
-        
+        end       
         function obj=resample(obj,desired_samplerate)
             
             numsubs=size(obj.data(:,1),1);
@@ -493,12 +464,7 @@ classdef iTrack < handle
             
             
             
-        end
-        
-        
-        
-        
-        
+        end      
         function obj=baseline(obj,baseline_times,varargin)
             p = inputParser;
             p.addParameter('method','percent',@ischar);
@@ -601,8 +567,7 @@ classdef iTrack < handle
                 
             end
             
-        end
-        
+        end      
         function obj=index_events(obj,varnames,varargin)
             
             
@@ -626,11 +591,11 @@ classdef iTrack < handle
                         var1=varnames{v};
                         
                         %zhongxu replaced this
-%                         vartime=double(trial.events.time(find(ismember(trial.events.message,var1))));
-                       % with the following because we may need a partial
-                       % match (eyelink message sometime has weird symbols)
-                          vartime=double(trial.events.time(find(~cellfun(@isempty,strfind(trial.events.message,var1)))));
-
+                        %                         vartime=double(trial.events.time(find(ismember(trial.events.message,var1))));
+                        % with the following because we may need a partial
+                        % match (eyelink message sometime has weird symbols)
+                        vartime=double(trial.events.time(find(~cellfun(@isempty,strfind(trial.events.message,var1)))));
+                        
                         if ~isempty(vartime)
                             start=double(1-vartime);
                             endtime=double(trial.numsamples-vartime); %zhongxu: aha, we may need to consider smaple-rate here; alternatively, we need resample all data to 1000hz
@@ -650,9 +615,7 @@ classdef iTrack < handle
             end
             
             
-        end
-        
-        
+        end       
         function obj=epoch(obj,varargin)
             p = inputParser;
             p.addParameter('type','baselined',@(x) ismember(x,{'fix','baselined','raw'}));
@@ -691,7 +654,7 @@ classdef iTrack < handle
                             startwindow=find(trial.index.(lineup_var)==((before_lineup-1)*-1)); %time of event is 0, so 500 ms before would be coded as -499 (NOT -500), hence the -1
                             
                             endwindow=find(trial.index.(lineup_var)==after_lineup);
-                          
+                            
                             %%
                             
                             switch p.Results.type
@@ -754,9 +717,7 @@ classdef iTrack < handle
             
             
             
-        end
-        
-        
+        end       
         function allfigdata = linePlots(obj,varargin)
             %wrapper function for linePlots (which can be used
             %independently)
@@ -833,9 +794,7 @@ classdef iTrack < handle
                 'filter',p.Results.filter); %zhongxu add filter);
             
             
-        end
-        
-        
+        end      
         function [varargout] = get_new(obj,varargin)
             
             p = inputParser;
@@ -993,9 +952,9 @@ classdef iTrack < handle
                         
                         for r = 1:length(rois)
                             
-%                     varargout{count} =
-%                     vertcat(temp_event.(rois{r}));%zhongxu changed this
-%                     to the following to lines
+                            %                     varargout{count} =
+                            %                     vertcat(temp_event.(rois{r}));%zhongxu changed this
+                            %                     to the following to lines
                             tempa = temp_event.(rois{r});
                             varargout{count} = vertcat(tempa);
                             count = count+1;
@@ -1008,10 +967,7 @@ classdef iTrack < handle
             end
             
             
-        end
-        
-        
-        
+        end     
         function [data,datamat]=get(obj,varargin)
             %generic function for pulling data from iTrack objects
             %options are:
@@ -1213,9 +1169,7 @@ classdef iTrack < handle
             
             
             
-        end
-        
-        
+        end      
         function data= report(obj,varargin)
             p = inputParser;
             p.addRequired('type');
@@ -1283,31 +1237,24 @@ classdef iTrack < handle
                     data = beh;
             end
             
-        end
-        
-        
-      
-%         function t = extract_EdfMessageTime(obj,varargin)
-%   zhongxu not working
-%             
-%             numsubs=size(obj.data(:,1),1);
-%             
-%             for s=1:numsubs
-%                 eyeStruct=obj.data{s};              
-%                 
-%                 fprintf('subject %d out of %d\n',s,numsubs);
-%                 for i = 1:size(eyeStruct,2)
-%                     for ims = 1:length(edfMessage)
-%                         t(i,ims)=double(eyeStruct(i).events.time(find(~cellfun(@isempty,strfind(eyeStruct(i).events.message,edfMessage{ims})))));
-%                     end
-%                 end
-%                 
-%             end
-%         end
-        
-        
-        
-        
+        end        
+        %         function t = extract_EdfMessageTime(obj,varargin)
+        %   zhongxu not working
+        %
+        %             numsubs=size(obj.data(:,1),1);
+        %
+        %             for s=1:numsubs
+        %                 eyeStruct=obj.data{s};
+        %
+        %                 fprintf('subject %d out of %d\n',s,numsubs);
+        %                 for i = 1:size(eyeStruct,2)
+        %                     for ims = 1:length(edfMessage)
+        %                         t(i,ims)=double(eyeStruct(i).events.time(find(~cellfun(@isempty,strfind(eyeStruct(i).events.message,edfMessage{ims})))));
+        %                     end
+        %                 end
+        %
+        %             end
+        %         end
         function dataDS=build_dataset(obj,varargin)
             
             p = inputParser;
@@ -1465,9 +1412,7 @@ classdef iTrack < handle
                 
                 
             end
-        end
-        
-        
+        end     
         function obj=remove_artifacts(obj,varargin)
             
             p = inputParser;
@@ -1633,8 +1578,7 @@ classdef iTrack < handle
                 
             end
             
-        end
-        
+        end       
         function obj=filter_trials(obj,varargin)
             p = inputParser;
             p.addParameter('variable','',@ischar);
@@ -1660,9 +1604,7 @@ classdef iTrack < handle
                 
             end
             
-        end
-        
-        
+        end        
         function obj=remove_fields(obj,fieldnames)
             
             
@@ -1682,9 +1624,7 @@ classdef iTrack < handle
                 
             end
             
-        end
-        
-        
+        end       
         function obj=add_fields(obj,varargin)
             p = inputParser;
             p.addParameter('events',0,@(x) islogical(x) || (ismember(x,[0,1])));
@@ -1726,8 +1666,6 @@ classdef iTrack < handle
             
             
         end
-        
-        
         function obj=extract_event(obj,varargin)
             p = inputParser;
             p.addParameter('search',1,@ischar);
@@ -1811,9 +1749,7 @@ classdef iTrack < handle
             
             
             
-        end
-        
-        
+        end       
         function obj=rename_messages(obj,search_exp,replace_exp,replacement)
             
             numsubs=size(obj.data(:,1),1);
@@ -1844,8 +1780,7 @@ classdef iTrack < handle
             
             
             
-        end
-        
+        end        
         function obj=add_event(obj,times,varargin)
             p = inputParser;
             p.addParameter('index',{},@iscell);
@@ -1874,8 +1809,7 @@ classdef iTrack < handle
             
             
             
-        end
-        
+        end       
         function obj=load_events(obj,varargin)
             
             
@@ -1897,8 +1831,6 @@ classdef iTrack < handle
             end
             
         end
-        
-        
         function obj=pupil_subset(obj,criteria)
             
             numsubs=size(obj.data(:,1),1);
@@ -1922,8 +1854,7 @@ classdef iTrack < handle
                 
             end
             
-        end
-        
+        end      
         function [fixcell,eyetable] = get_eyeEvents(obj,varargin)
             
             p = inputParser;
@@ -2101,8 +2032,6 @@ classdef iTrack < handle
             
             
         end
-        
-        
         function obj=index_fixations(obj)
             
             %grab all fixations
@@ -2137,17 +2066,13 @@ classdef iTrack < handle
             
             
             
-        end
-        
-        
+        end       
         function obj=clearROIs(obj)
             
             obj.rois.single=[];
             obj.rois.combined=[];
             
-        end
-        
-        
+        end       
         function obj=makeROIs(obj,pos,varargin)
             
             p = inputParser;
@@ -2257,8 +2182,7 @@ classdef iTrack < handle
             end
             
             
-        end
-        
+        end 
         function obj=combineROIs(obj,RoiIndex)
             % zhongxu add: specifiy which ROIs need to be combined, not  just combined all
             % TODO: these line of codes are ugly, need to be simplified.
@@ -2295,27 +2219,7 @@ classdef iTrack < handle
             
             obj.rois.combined = combined;
             
-        end
-        
-        %         % original combineROIs
-        %         function obj=combineROIs(obj)
-        %
-        %             numrois = length(obj.rois.single);
-        %
-        %             combined = zeros(size(obj.rois.single(1).mask));
-        %
-        %             for r = 1:numrois
-        %
-        %                 combined = combined + obj.rois.single(r).mask;
-        %
-        %             end
-        %
-        %             obj.rois.combined = combined;
-        %
-        %         end
-        
-        
-        
+        end   
         function obj = calcHits(obj,varargin)
             %wrapper for calcEyehits_ to make it easier to repeat for
             %fixations and saccades.
@@ -2328,7 +2232,6 @@ classdef iTrack < handle
             obj = calcEyehits_(obj,'rois',p.Results.rois,'type','saccade_end');
             
         end
-        
         function obj= calcEyehits_(obj,varargin)
             %internal function for calculating whether fixations/saccades
             %hit a given roi or not.
@@ -2453,10 +2356,6 @@ classdef iTrack < handle
             end
             
         end
-        
-        
-        
-        
         function obj = calcHits_zx(obj,varargin)
             %wrapper for calcEyehits_ to make it easier to repeat for
             %fixations and saccades.
@@ -2468,8 +2367,7 @@ classdef iTrack < handle
             obj = calcEyehits_zx(obj,'rois',p.Results.rois,'type','saccade_start');
             obj = calcEyehits_zx(obj,'rois',p.Results.rois,'type','saccade_end');
             
-        end
-        
+        end 
         function obj= calcEyehits_zx(obj,varargin)
             %internal function for calculating whether fixations/saccades
             %hit a given roi or not.
@@ -2593,9 +2491,6 @@ classdef iTrack < handle
                 end
             end
         end
-        
-        
-        
         function varargout = subsref(obj,S)
             %this allows you to index the object like you would with
             %structures. You can use any field in obj.data or any behavioral
@@ -2607,8 +2502,8 @@ classdef iTrack < handle
                 %matalab's builtin stuff
                 [varargout{1:nargout}] = builtin('subsref',obj,S);
             elseif any(strcmp(S(1).type,'.')) && ismember(S(1).subs,methods(obj))
-                  [varargout{1:nargout}] = builtin('subsref',obj,S);
-
+                [varargout{1:nargout}] = builtin('subsref',obj,S);
+                
             elseif length(S)==1
                 [objfields,behfields] = get_all_fields(obj);
                 
@@ -2627,9 +2522,7 @@ classdef iTrack < handle
                 'sorry byeforever'
             end
             
-        end
-        
-        
+        end    
         function [objfields,behfields] = get_all_fields(obj)
             
             objfields = cellfun(@fieldnames,obj.data,'Uniform',false);
@@ -2649,9 +2542,7 @@ classdef iTrack < handle
             objfields = unique(objfields);
             behfields = unique(behfields);
             
-        end
-        
-        
+        end   
         function obj=mapROIs(obj,varargin)
             %wrapper for roimapper. Makes it easy to repeat for fixations
             %and saccades and for multiple mappings.
@@ -2689,10 +2580,6 @@ classdef iTrack < handle
                 obj = roimapper_(obj,names{n},'type','saccade_end','indicator',ind);
             end
         end
-        
-        
-        
-        
         function obj=roimapper_(obj,newName,varargin)
             %primarily mapping from original experiment-wide ROIs (1,2,3..) to
             %trial-specific rois (e.g., 'target','distractor')
@@ -2801,8 +2688,6 @@ classdef iTrack < handle
             
             
         end
-        
-        
         function obj=calcHitsOverTime(obj,varargin)
             p = inputParser;
             p.addParameter('rois','all',@iscell);
@@ -2863,10 +2748,7 @@ classdef iTrack < handle
             end
             
             
-        end
-        
-        
-        
+        end  
         function aggDS=aggregate(obj,varargin)
             p = inputParser;
             p.addParameter('fix',true);
@@ -2901,10 +2783,7 @@ classdef iTrack < handle
             aggDS.Properties.VariableNames((end-(length(p.Results.rois))+1):end) = dataVarnames;
             
             
-        end
-        
-        
-        
+        end     
         function obj = scatterplots(obj,factors,varargin)
             
             p = inputParser;
@@ -2931,9 +2810,7 @@ classdef iTrack < handle
             fix_scatterplots(fixdata,factors,'overlay',overlay,'roi',p.Results.roi,'Xvar','fix_x','Yvar','fix_y','screendims',obj.screen.dims,'color',p.Results.color,'size',p.Results.size,'zoom',p.Results.zoom,'hitonly',p.Results.hitonly,'skipnan',p.Results.skipnan);
             
             
-        end
-        
-        
+        end      
         function obj = binData(obj,window_size,varargin)
             
             p = inputParser;
@@ -3005,8 +2882,6 @@ classdef iTrack < handle
                 
             end
         end
-        
-        
         function obj = put(obj,input,varargin)
             p = inputParser;
             p.addParameter('event','',@ischar);
@@ -3045,9 +2920,7 @@ classdef iTrack < handle
             end
             
             
-        end
-        
-        
+        end      
         function obj = filter_eyeEvents(obj,varargin)
             p = inputParser;
             p.addRequired('direction',@(x) ischar(x) && ismember(lower(x),{'before','after'}));
@@ -3108,9 +2981,7 @@ classdef iTrack < handle
             
             
             
-        end
-        
-        
+        end        
         function obj=change_fixationdata(obj,newdata,varargin)
             p = inputParser;
             p.addParameter('fields',{'fix_x','fix_y'},@iscell);
@@ -3185,9 +3056,7 @@ classdef iTrack < handle
             
             
             
-        end
-        
-        
+        end     
         function obj = drift_correct(obj,factors,varargin)
             %performs drift correction separately for each level of
             %"factors". For instance, every Block, or across different
@@ -3266,9 +3135,7 @@ classdef iTrack < handle
                 quickview(obj);
             end
             
-        end
-        
-        
+        end      
         function displayROIs(obj,varargin)
             %displays all rois with numbers overlaid
             
@@ -3289,9 +3156,7 @@ classdef iTrack < handle
             
             
         end
-        
-        
-        
+    
     end
 end
 
