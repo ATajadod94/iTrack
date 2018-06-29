@@ -12,11 +12,11 @@ classdef iTrack  < handle
     end
     
     methods        
-        function obj=iTrack(use_edf,varargin)
-            if use_edf ==1
+        function obj=iTrack(varargin)
+            if varargin{1}
                 p = inputParser;
                 p.addParameter('edfs',{},@(x) iscell(x) || ischar(x));
-                p.addParameter('samples',0,@(x) islogical(x) || ismember(x,[0,1]))
+                p.addParameter('samples',1,@(x) islogical(x) || ismember(x,[0,1]))
                 p.addParameter('subject_var','ID',@ischar)
                 p.addParameter('resolution',[1024,768],@(x) length(x)==2 && isnumeric(x));
                 p.addParameter('overlay',nan(1,3),@(x) isnumeric(x) && size(x,1)==3);
@@ -245,10 +245,7 @@ classdef iTrack  < handle
                 end
 
                 %check to see if everyone was recorded at same sample rate
-                checksamprate = unique(cellfun(@(x) unique(cell2mat(x)),subsref(obj,struct('type','.','subs','sample_rate')),'Uniform',true));
-                if length(checksamprate)>1
-                    warning('WARNING: You have different sample rates for different subjects! Use "resample" if you are looking at pupil data!');
-                end
+
 
 
                 obj = index_fixations(obj); %represents the fixations with binary matricies, useful for other operations
@@ -1673,12 +1670,8 @@ classdef iTrack  < handle
             p.addParameter('time',0,@(x) islogical(x) || (ismember(x,[0,1])));
             p.addParameter('striptext',0,@(x) islogical(x) || (ismember(x,[0,1])));
             p.addParameter('behfield',1,@(x) islogical(x) || (ismember(x,[0,1])));
-            parse(p,varargin{:});
-            
-            
-            numsubs=size(obj.data(:,1),1);
-            
-            
+            parse(p,varargin{:});       
+            numsubs=size(obj.data(:,1),1);    
             %if no fieldname given, just go with strmatch, minus any
             %unwanted characters
             if isempty(p.Results.fieldname)
